@@ -187,6 +187,13 @@ def run_backtest(df, config):
             trade_closed = False
             exit_price = -1
             outcome = 'pending'
+
+            if (not open_trade.get('be_triggered') and current_time > open_trade['entry_time'] and
+                ((open_trade['type'] == 'long' and current_candle['bos_type'] == 'bullish') or
+                 (open_trade['type'] == 'short' and current_candle['bos_type'] == 'bearish'))):
+                open_trade['sl'] = open_trade['be_price']
+                open_trade['be_triggered'] = True
+                logging.info(f"[{current_time}] BOS у напрямку позиції. SL переведено в BE.")
             
             if open_trade['type'] == 'long':
                 if current_candle['low'] <= open_trade['sl']: trade_closed, exit_price, outcome = True, open_trade['sl'], 'loss'
@@ -249,7 +256,7 @@ def run_backtest(df, config):
                         pos_size = (current_balance * (RISK_PER_TRADE_PERCENT / 100)) / risk_abs
                         commission, be_price = breakeven_info(entry_price, pos_size, active_setup['type'])
                         
-                        open_trade = {**active_setup, 'entry_time': current_time, 'pos_size': pos_size, 'commission': commission, 'be_price': be_price}
+                        open_trade = {**active_setup, 'entry_time': current_time, 'pos_size': pos_size, 'commission': commission, 'be_price': be_price, 'be_triggered': False}
                         consumed_fvgs.add(open_trade['fvg_time'])
                         trades_today_count += 1
                         
@@ -305,24 +312,29 @@ def run_backtest(df, config):
                                 logging.debug(f"[{current_time}] Пошук f1: Фрактал НЕ підходить (дно {fractal_level:.2f} >= min FVG {active_fvg['min']:.2f}).")
 
                 elif not active_f2:
-                    if (is_bullish_context and current_candle['is_high_fractal'] and current_candle['high'] > active_fvg['max']):
-                        active_f1 = df.iloc[i-1]
-                        active_f2 = None
-                        logging.info(f"[{current_time}] Знайдено новий F1 ({active_f1.name}), старий скасовано.")
-                    elif (is_bullish_context and current_candle['is_low_fractal'] and current_candle['low'] <= active_fvg['max']):
-                        active_f2 = df.iloc[i-1]
-                        logging.info(f"[{current_time}] Знайдено F2 ({active_f2.name}).")
-                    elif (not is_bullish_context and current_candle['is_low_fractal'] and current_candle['low'] < active_fvg['min']):
-                        active_f1 = df.iloc[i-1]
-                        active_f2 = None
-                        logging.info(f"[{current_time}] Знайдено новий F1 ({active_f1.name}), старий скасовано.")
-                    elif (not is_bullish_context and current_candle['is_high_fractal'] and current_candle['high'] >= active_fvg['min']):
-                        active_f2 = df.iloc[i-1]
-                        logging.info(f"[{current_time}] Знайдено F2 ({active_f2.name}).")
+                    if not is_trading_hour(current_time):
+                        logging.debug(f"[{current_time}] Пошук f2: Не торговий час.")
+                    else:
+                        if (is_bullish_context and current_candle['is_high_fractal'] and current_candle['high'] > active_fvg['max']):
+                            active_f1 = df.iloc[i-1]
+                            active_f2 = None
+                            logging.info(f"[{current_time}] Знайдено новий F1 ({active_f1.name}), старий скасовано.")
+                        elif (is_bullish_context and current_candle['is_low_fractal'] and current_candle['low'] <= active_fvg['max']):
+                            active_f2 = df.iloc[i-1]
+                            logging.info(f"[{current_time}] Знайдено F2 ({active_f2.name}).")
+                        elif (not is_bullish_context and current_candle['is_low_fractal'] and current_candle['low'] < active_fvg['min']):
+                            active_f1 = df.iloc[i-1]
+                            active_f2 = None
+                            logging.info(f"[{current_time}] Знайдено новий F1 ({active_f1.name}), старий скасовано.")
+                        elif (not is_bullish_context and current_candle['is_high_fractal'] and current_candle['high'] >= active_fvg['min']):
+                            active_f2 = df.iloc[i-1]
+                            logging.info(f"[{current_time}] Знайдено F2 ({active_f2.name}).")
 
                 elif active_f1 and active_f2:
-                    if (is_bullish_context and current_candle['bos_type'] == 'bullish' and current_candle['close'] > active_f1['high']) or \
-                       (not is_bullish_context and current_candle['bos_type'] == 'bearish' and current_candle['close'] < active_f1['low']):
+                    if not is_trading_hour(current_time):
+                        logging.debug(f"[{current_time}] BOS: Не торговий час.")
+                    elif (is_bullish_context and current_candle['bos_type'] == 'bullish' and current_candle['close'] > active_f1['high']) or \
+                         (not is_bullish_context and current_candle['bos_type'] == 'bearish' and current_candle['close'] < active_f1['low']):
                         
                         trade_type = 'long' if is_bullish_context else 'short'
                         f1_price = active_f1['high'] if trade_type == 'long' else active_f1['low']
