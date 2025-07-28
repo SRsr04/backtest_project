@@ -1,0 +1,14 @@
+# Ігноруємо всі CSV
+*.csv
+*.log
+
+# Ігноруємо папки з даними
+logs/
+datasets/
+
+# Python-specific
+__pycache__/
+*.pyc
+.venv/
+.env
+.ipynb_checkpoints/
