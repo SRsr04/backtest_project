@@ -1,162 +1,220 @@
 import pandas as pd
 import numpy as np
-import sys
 
 RED = "\033[91m"
 GREEN = "\033[92m"
 RESET = "\033[0m"
 
+def parse_kiev(x):
+    """Parse date strings (or arrays) into naive Kyiv-localized Timestamps."""
+    dt = pd.to_datetime(x, utc=True)
+    return dt.tz_convert("Europe/Kiev").tz_localize(None)
+
 def load_data():
-    # 1. Прочитати всі 4 файли
-    m5_df = pd.read_csv('m5_candels.csv')
-    m15_df = pd.read_csv('m15_candels.csv')
-    fvg_df = pd.read_csv('fvg_m15.csv')
-    bos_df = pd.read_csv('bos_m5.csv')
-    # 2. Конвертувати дат
-    def to_kiev(series):
-        return pd.to_datetime(series, errors='coerce', utc = True).dt.tz_convert('Europe/Kiev').dt.tz_localize(None)
-    m5_df['datetime'] = to_kiev(m5_df.datetime)
-    m15_df['datetime'] = to_kiev(m15_df.datetime)
-    fvg_df['time'] = to_kiev(fvg_df.time)
-    bos_df['bos_time'] = to_kiev(bos_df.bos_time)
-    bos_df['bos_time_kiev'] = to_kiev(bos_df.bos_time_kiev)
-    # 3. Поставити індекси для свічок і відсортувати
-    m5_df = m5_df.set_index('datetime').sort_index(ascending=True)
-    m15_df = m15_df.set_index('datetime').sort_index(ascending=True)
-    # 4. Прибрати зайві колонки
+    """Load and prepare all 4 CSVs."""
+    m5_df = pd.read_csv(
+        'm5_candels.csv',
+        parse_dates=['datetime'],
+        date_parser=parse_kiev
+    )
+    m15_df = pd.read_csv(
+        'm15_candels.csv',
+        parse_dates=['datetime'],
+        date_parser=parse_kiev
+    )
+    fvg_df = pd.read_csv(
+        'fvg_m15.csv',
+        parse_dates=['time'],
+        date_parser=parse_kiev
+    )
+    bos_df = pd.read_csv(
+        'bos_m5.csv',
+        parse_dates=['bos_time', 'bos_time_kiev'],
+        date_parser=parse_kiev
+    )
+
+    # 3. Index & sort candle DataFrames
+    m5_df = m5_df.set_index('datetime').sort_index()
+    m15_df = m15_df.set_index('datetime').sort_index()
+    # 4. Drop unused
     m15_df.drop(columns=['timestamp_utc'], inplace=True, errors='ignore')
-    # 5. Повернути DataFrame
+
     return m5_df, m15_df, fvg_df, bos_df
 
-
 def find_fractals(df):
-    fractals = []
-    highs = df['high'].values
-    lows = df['low'].values
-    idx = df.index
+    """Vectorized 3-bar fractal detection."""
+    highs = df['high'].to_numpy()
+    lows  = df['low'].to_numpy()
+    times = df.index.to_numpy()
 
-    for i in range(1, len(df) - 1):
-        # 1. Перевірити верхній фрактал
-        if highs[i] > highs[i - 1] and highs[i] > highs[i + 1]:
-            fractals.append({'time': idx[i], 'price': highs[i], 'type': 'high'})
-        elif lows[i] < lows[i - 1] and lows[i] < lows[i + 1]:
-            fractals.append({'time': idx[i], 'price': lows[i], 'type': 'low'})
-    return pd.DataFrame(fractals)
+    mask_high = (highs[1:-1] > highs[:-2]) & (highs[1:-1] > highs[2:])
+    mask_low  = (lows[1:-1]  < lows[:-2]) & (lows[1:-1]  < lows[2:])
+
+    high_idxs = np.nonzero(mask_high)[0] + 1
+    low_idxs  = np.nonzero(mask_low)[0]  + 1
+
+    all_times  = np.concatenate([times[high_idxs],  times[low_idxs]])
+    all_prices = np.concatenate([highs[high_idxs], lows[low_idxs]])
+    all_types  = np.concatenate([
+        np.full(high_idxs.shape, 'high', dtype=object),
+        np.full(low_idxs.shape,  'low',  dtype=object)
+    ])
+
+    fr = pd.DataFrame({
+        'time':  all_times,
+        'price': all_prices,
+        'type':  all_types
+    })
+    return fr.sort_values('time').reset_index(drop=True)
+
+def find_mitigation(fvg_time, fvg_max, fvg_min, fvg_type, m15_df):
+    """Return (timestamp, close) of first M15 candle that mitigates the FVG."""
+    start = fvg_time + pd.Timedelta(minutes=15)
+    candles = m15_df.loc[start:]
+    if candles.empty:
+        return None
+
+    if fvg_type == 'bullish':
+        mask = candles['close'] < fvg_min
+    else:
+        mask = candles['close'] > fvg_max
+
+    if not mask.any():
+        return None
+
+    # first True position
+    pos = np.argmax(mask.values)
+    ts  = candles.index[pos]
+    price = float(candles['close'].iat[pos])
+    return ts, price
 
 def fractals_after_fvg(fvg_df, fractals_df):
+    """
+    Для кожного FVG знаходить перший коректний F1 та оптимальний F2 з урахуванням появи нових F1.
+    Повертає список словників результатів.
+    """
     results = []
-    # масив часів фракталів
-    fractals_times = fractals_df['time']
-    
+
+    # Перетворюємо колонки на NumPy-масиви
+    times = fractals_df['time'].to_numpy()
+    prices = fractals_df['price'].to_numpy()
+    types_ = fractals_df['type'].to_numpy()
+
     for _, fvg in fvg_df.iterrows():
-        fvg_time = pd.Timestamp(fvg['time']+ pd.Timedelta(minutes=15))
-        
-        # шукаємо позицію першого фрактала після FVG
-        idx = fractals_times.searchsorted(fvg_time)
-        
-        # перевіряємо, що є хоча б два фрактали після FVG
-        if idx + 1 >= len(fractals_times):
+        # Визначаємо параметри zoni
+        fvg_time = np.datetime64(fvg['time']) + np.timedelta64(15, 'm')
+        fvg_min = fvg['min']
+        fvg_max = fvg['max']
+        fvg_type = fvg['type']
+
+        # Позиція першого фрактала після FVG + 15 хв
+        start = np.searchsorted(times, fvg_time)
+        if start >= len(times) - 1:
             continue
-        
-        f1 = fractals_df.iloc[idx]
-        f2 = fractals_df.iloc[idx + 1]
-        
-        results.append({
-            "fvg_time": pd.Timestamp(fvg['time']) + pd.Timedelta(minutes=15),
-            "fvg_type": fvg['type'],
-            "f1_time": f1['time'], "f1_price": f1['price'], "f1_type": f1['type'],
-            "f2_time": f2['time'], "f2_price": f2['price'], "f2_type": f2['type'],
-            "fvg_min": fvg['min'],
-            "fvg_max": fvg['max'],
-        })
-    
-    return results
 
-def add_bos_after_f2(fvg_f1_f2_list, bos_df, debug=False):
-    results = []
-    bos_df = bos_df.sort_values('bos_time_kiev').reset_index(drop=True)
-    bos_times = bos_df['bos_time_kiev'].values
-    bos_closes = bos_df['close'].values
-    bos_types = bos_df['type'].values
-    bos_levels = bos_df['level'].values
-    
+        # Зріз цін та типів від start
+        slice_prices = prices[start:]
+        slice_types = types_[start:]
 
-    for n, item in enumerate(fvg_f1_f2_list):
-        f2_time = np.datetime64(item['f2_time'])
-        f1_price = item['f1_price']
-        f1_type = item['f1_type']
-        fvg_min = item['fvg_min']
-        fvg_max = item['fvg_max']
-        f2_price = item['f2_price']
-        fvg_type = item['fvg_type']
-
+        # Маска для кандидатів на F1
         if fvg_type == 'bullish':
-            if not (f1_price > fvg_max and fvg_min <= f2_price <= fvg_max):
-                if debug:
-                    print(f"{RED}❌ F1/F2 не відповідають правилам для лонга{RESET}")
-                continue
-
-        # Логіка для шорта
-        elif fvg_type == 'bearish':
-            if not (f1_price < fvg_min and fvg_min <= f2_price <= fvg_max):
-                if debug:
-                    print(f"{RED}❌ F1/F2 не відповідають правилам для шорта{RESET}")
-                continue
-
-        if not (fvg_min <= f2_price <= fvg_max):
-            if debug:
-                print(f"{RED}❌ F2 ({f2_price}) не в зоні FVG ({fvg_min} - {fvg_max}){RESET}")
-                continue
-
-        idx = np.searchsorted(bos_times, f2_time)
-
-        if idx >= len(bos_times):
-            # if debug:
-            #     print(f"[{n}] f2_time {item['f2_time']} → BOS not found (за межами)")
+            mask1 = (slice_types == 'high') & (slice_prices > fvg_max)
+        else:
+            mask1 = (slice_types == 'low') & (slice_prices < fvg_min)
+        rels1 = np.nonzero(mask1)[0]
+        if rels1.size == 0:
             continue
 
-        bos_deadline = item['fvg_time'] + np.timedelta64(2, 'h')
-        if bos_times[idx] > bos_deadline:
-          if debug:
-           print(f"{RED}❌ BOS запізнився: {bos_times[idx]} (FVG: {item['fvg_time']}){RESET}")
-           continue
-
-        if debug:
-            print(f"\n[{n}] f2_time: {item['f2_time']} | f1_price: {f1_price} ({f1_type})")
-            print("bos candidate at idx:")
-            print(bos_df.iloc[idx][['bos_time_kiev','close','level','type']])
-
+        # Перебір усіх rels1 у хронологічному порядку
         found = False
-        while idx < len(bos_times):
-            if bos_times[idx] > bos_deadline:
-                if debug:
-                    print(f"{RED}❌ BOS запізнився: {bos_times[idx]} (FVG: {item['fvg_time']}){RESET}")
-                    break
-            if f1_type == 'high' and bos_closes[idx] > f1_price:
-                # if debug:
-                #     print(f"{GREEN}✔ BOS знайдений: {bos_times[idx]} > {f1_price}{RESET}")
-                item.update({
-                    "bos_time": bos_times[idx],
-                    "bos_type": bos_types[idx],
-                    "bos_price": bos_levels[idx]
-                })
-                results.append(item)
-                break
-            elif f1_type == 'low' and bos_closes[idx] < f1_price:
-                # if debug:
-                #     print(f"{GREEN}✔ BOS знайдений: {bos_times[idx]} < {f1_price}{RESET}")
-                item.update({
-                    "bos_time": bos_times[idx],
-                    "bos_type": bos_types[idx],
-                    "bos_price": bos_levels[idx]
-                })
-                results.append(item)
-                break
-            idx += 1
-        if debug and not found:
-            print(f"→ No BOS found after f2_time for this FVG")
-    return results
+        for i, rel1 in enumerate(rels1):
+            f1_idx = start + rel1
 
+            # Обмежуємо діапазон пошуку F2 до наступного rel1 або кінця
+            next_rel1 = rels1[i+1] if i+1 < len(rels1) else len(slice_prices)
+            tail_start = f1_idx + 1
+            tail_end = start + next_rel1
+            tail_prices = prices[tail_start:tail_end]
+            tail_times = times[tail_start:tail_end]
+
+            if tail_prices.size == 0:
+                continue
+
+            # Маска для F2 у межах FVG
+            mask2 = (tail_prices >= fvg_min) & (tail_prices <= fvg_max)
+            if not mask2.any():
+                continue
+
+            # Вибір оптимального F2
+            if fvg_type == 'bullish':
+                rel2 = np.argmin(np.where(mask2, tail_prices, np.inf))
+            else:
+                rel2 = np.argmax(np.where(mask2, tail_prices, -np.inf))
+            f2_idx = tail_start + rel2
+
+            # Додаємо результат
+            results.append({
+                'fvg_time': pd.Timestamp(fvg_time),
+                'fvg_type': fvg_type,
+                'fvg_min': fvg_min,
+                'fvg_max': fvg_max,
+                'f1_time': pd.Timestamp(times[f1_idx]),
+                'f1_price': float(prices[f1_idx]),
+                'f1_type': types_[f1_idx],
+                'f2_time': pd.Timestamp(times[f2_idx]),
+                'f2_price': float(prices[f2_idx]),
+                'f2_type': types_[f2_idx],
+            })
+            found = True
+            break
+
+        # якщо знайшли — переходимо до наступного FVG
+        if found:
+            continue
+
+    return pd.DataFrame(results)
+
+def add_bos_after_f2(fvg_list, bos_df, debug=False):
+    """Attach BOS after F2 using NumPy masks for speed."""
+    results = []
+    bos_sorted = bos_df.sort_values('bos_time_kiev')
+    times   = bos_sorted['bos_time_kiev'].to_numpy()
+    closes  = bos_sorted['close'].to_numpy()
+    types   = bos_sorted['type'].to_numpy()
+    levels  = bos_sorted['level'].to_numpy()
+
+    for item in fvg_list:
+        f2ts, f1p, fvg_min, fvg_max, f1t = (
+            np.datetime64(item['f2_time']),
+            item['f1_price'],
+            item['fvg_min'],
+            item['fvg_max'],
+            item['f1_type'],
+        )
+        start = np.searchsorted(times, f2ts)
+        if start >= times.size:
+            continue
+
+        deadline = np.datetime64(item['fvg_time']) + np.timedelta64(2, 'h')
+        t_sub = times[start:]
+        c_sub = closes[start:]
+
+        mask = (t_sub <= deadline) & (
+            (c_sub > f1p) if f1t == 'high' else (c_sub < f1p)
+        )
+        if not mask.any():
+            continue
+        rel = np.argmax(mask)
+        gi = start + rel
+
+        item.update({
+            'bos_time': times[gi],
+            'bos_type': types[gi],
+            'bos_price': float(levels[gi])
+        })
+        results.append(item)
+
+    return results
 
 def format_results(results):
     formatted = []
@@ -179,15 +237,31 @@ def format_results(results):
 if __name__ == "__main__":
     m5_df, m15_df, fvg_df, bos_df = load_data()
     m5_fractals = find_fractals(m5_df)
-    m15_fractals = find_fractals(m15_df)
-    fvg_df['time'] = fvg_df['time'].dt.tz_localize(None)
-    m5_fractals['time'] = m5_fractals['time'].dt.tz_localize(None)
-    fvg_fractals = fractals_after_fvg(fvg_df, m5_fractals)
-    bos_df = bos_df.dropna(subset=['bos_time_kiev']).sort_values('bos_time_kiev').reset_index(drop=True)
+    fvg_res     = fractals_after_fvg(fvg_df, m5_fractals)
 
-    fvg_f1_f2_bos = add_bos_after_f2(fvg_fractals, bos_df, debug=True)
+    # --- 1) будуємо список сетапів і додаємо BOS ---
+    raw_setups = fvg_res.to_dict(orient="records")
+    setups     = add_bos_after_f2(raw_setups, bos_df)
 
-clean_results = format_results(fvg_f1_f2_bos)
-for r in clean_results[:5]:
-    print(r)
+    if setups:
+        first = setups[0]
+        print("Перший сетап:")
+        print(f"  FVG    : {first['fvg_time']}  ({first['fvg_type']})  [{first['fvg_min']}–{first['fvg_max']}]")
+        print(f"  F1     : {first['f1_time']}  {first['f1_type']} @ {first['f1_price']}")
+        print(f"  F2     : {first['f2_time']}  {first['f2_type']} @ {first['f2_price']}")
+        print(f"  BOS    : {first['bos_time']}  {first['bos_type']} @ {first['bos_price']}")
+    else:
+        print("Немає жодного повного сетапу F1–F2–BOS.")
 
+    # --- 2) перевіряємо мітигації від FVG ---
+    def mit_row(r):
+        start = pd.Timestamp(r['fvg_time']) + pd.Timedelta(minutes=15)
+        mit = find_mitigation(start, r['fvg_max'], r['fvg_min'], r['fvg_type'], m15_df)
+        return mit or (pd.NaT, np.nan)
+
+    fvg_res[['mit_time','mit_close']] = fvg_res.apply(mit_row, axis=1, result_type='expand')
+
+    print("Мітиговано:", fvg_res['mit_time'].notna().sum())
+    if fvg_res['mit_time'].notna().any():
+        first_mit = fvg_res.loc[fvg_res['mit_time'].notna()].iloc[0].to_dict()
+        print("Перший мітигований FVG:", first_mit)
