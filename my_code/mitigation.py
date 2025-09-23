@@ -2,6 +2,12 @@ import pandas as pd
 import numpy as np
 
 def find_mitigation_v2(fvg_time, fvg_max, fvg_min, fvg_type, m15_df, *, eps=0.0, m15_index_is_close=True):
+    """
+    Шукає першу M15-свічку, що повертає ціну в межі FVG, та повертає часові позначки
+    її відкриття й закриття разом із ціною закриття.
+
+    Повертає словник із ключами "open", "close", "price" або None, якщо мітигації не знайдено.
+    """
     z_low, z_high = (min(fvg_min, fvg_max), max(fvg_min, fvg_max))
     start = fvg_time + pd.Timedelta(minutes=15)  # якщо fvg_time – close FVG-бару
     candles = m15_df.loc[start:]

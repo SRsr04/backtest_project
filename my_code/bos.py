@@ -53,6 +53,15 @@ def add_bos_after_f2(fvg_list, bos_df, debug=False):
 
 
 def blank_h4_columns(df: pd.DataFrame, keep_k: int, max_keep: int):
+    """
+    Обнуляє службові колонки H4 (h4_*) після того, як ліміт збережених BOS зменшився.
+
+    Параметри
+    ----------
+    df: DataFrame із колонками h4_*, які потрібно зачистити.
+    keep_k: Скільки останніх H4-значень залишити заповненими.
+    max_keep: Скільки колонок існує загалом; усе після keep_k перезаписується NA/None.
+    """
     for j in range(keep_k+1, max_keep+1):
         for suffix in ("bos_time","confirm_time","dir","level","close","fract_time"):
             col = f"h4_{j}_{suffix}"

@@ -237,25 +237,6 @@ def simulate_entry(setups, m5_df, m1_df, mode=None, *, fib_level, stop_offset, r
         # законний assert
         assert search_start <= entry_time < hard_end
 
-        # # --- страхувальна заборона входу після мітигації ---
-        # print("MIT-DEBUG",
-        #     "id", setup.get("setup_id"),
-        #     "| s_start", search_start,
-        #     "| s_end", search_end,
-        #     "| mit_open", mit_open,
-        #     "| policy", mit_policy)
-
-        # # після обчислення entry_time:
-        # if mitigated:
-        #     if mit_policy in ("cutoff","open") and pd.notna(mit_open) and entry_time >= mit_open:
-        #         print("MIT-KILL cutoff", setup.get("setup_id"),
-        #             "entry", entry_time, ">= open", mit_open)
-        #         continue
-        #     if mit_policy in ("strict","close") and pd.notna(mit_close) and entry_time >= mit_close:
-        #         print("MIT-KILL strict", setup.get("setup_id"),
-        #             "entry", entry_time, ">= close", mit_close)
-        #         continue
-
         # --- take-before-entry ---
         limit_ts  = pd.to_datetime(setup.get('limit_placed_time'), errors='coerce')
         limit_ts  = limit_ts if pd.notna(limit_ts) else search_start

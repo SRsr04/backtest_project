@@ -1,6 +1,10 @@
 import pandas as pd
 
 def to_naive_kyiv(s: pd.Series, tz_name: str = "Europe/Kyiv"):
+    """
+    Конвертує числові, рядкові або timezone-aware дати в наївний datetime
+    у вказаному часовому поясі (типово Europe/Kyiv).
+    """
     s = s.copy()
 
     if pd.api.types.is_integer_dtype(s.dtype) or pd.api.types.is_float_dtype(s.dtype):

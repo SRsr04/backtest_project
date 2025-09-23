@@ -13,6 +13,10 @@ logging.basicConfig(
 )
 
 def load_data():
+    """
+    Завантажує CSV із різних таймфреймів, уніфікує часові колонки до наївного київського часу
+    та повертає підготовлені DataFrame-и (M5, M15, FVG, BOS, M1, H4) для подальшої обробки.
+    """
     m5_df  = pd.read_csv('m5_candels.csv')
     m15_df = pd.read_csv('m15_candels.csv')
     m1_df  = pd.read_csv('m1_candels.csv')

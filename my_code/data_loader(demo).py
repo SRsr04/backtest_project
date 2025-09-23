@@ -1,18 +1,3 @@
-# runner/pipeline.py: зібрати підготовку сетапів (створення raw_setups, мапи fvg_map, фільтрацію/мітигації, формування гріду параметрів, буферизацію результатів, запис у CSV/Parquet). Закоментований діагностичний блок винести в окремий скрипт diagnostics.py.
-# Головний модуль
-
-# Створити main.py, де імпортуються всі потрібні частини: from data_io import load_data, from signals.fractals import find_fractals, from runner.pipeline import run_pipeline (умовна функція, що запускає грід).
-# Усередині main() виконати повний сценарій: завантаження даних, побудова сетапів, перебір гріду й запис результатів; сюди ж перенести оголошення параметрів (fib_levels, stop_offsets, тощо).
-# В кінці файлу лишити лише if __name__ == "__main__": main(); саме main.py стане точкою входу для CLI або orchestrator-скриптів.
-# Додаткові поради
-
-# Константи за замовчуванням (каталоги, грід параметрів, прапор M15_INDEX_IS_CLOSE) винести в config.py, щоб легко підключати різні профілі запуску.
-# Розглянь винесення логування в окремий модуль (logging_setup.py) й викликати його з main.py до імпорту важких блоків — це прибере побічні ефекти під час імпорту.
-# Для тестування зручно мати простий __init__.py у кожній директорії, аби можна було імпортувати модулі як пакет my_code.
-# Як наступний крок обери назви файлів/пакетів, створити каркас модулів і поступово переносити функції, підкоригувавши імпорти. Якщо будуть уточнення щодо конкретних залежностей — дай знати.
-
-
-
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, date
@@ -32,6 +17,10 @@ logging.basicConfig(
 )
 
 def to_naive_kyiv(s: pd.Series, tz_name: str = "Europe/Kyiv"):
+    """
+    Конвертує числові, рядкові або timezone-aware позначки часу у наївний datetime
+    у заданому часовому поясі (типово Europe/Kyiv).
+    """
     s = s.copy()
 
     if pd.api.types.is_integer_dtype(s.dtype) or pd.api.types.is_float_dtype(s.dtype):
@@ -61,6 +50,10 @@ def to_naive_kyiv(s: pd.Series, tz_name: str = "Europe/Kyiv"):
 
     return out
 def load_data():
+    """
+    Завантажує CSV-файли зі свічками та BOS, уніфікує часові поля до наївного київського часу
+    й повертає підготовлені DataFrame-и для подальшої побудови сетапів.
+    """
     m5_df  = pd.read_csv('m5_candels.csv')
     m15_df = pd.read_csv('m15_candels.csv')
     m1_df  = pd.read_csv('m1_candels.csv')
@@ -188,6 +181,12 @@ def find_fractals(df):
     return fr.sort_values('time').reset_index(drop=True)
 
 def find_mitigation_v2(fvg_time, fvg_max, fvg_min, fvg_type, m15_df, *, eps=0.0, m15_index_is_close=True):
+    """
+    Шукає першу M15-свічку, що повертає ціну в межі FVG, та повертає часові позначки
+    її відкриття й закриття разом із ціною закриття.
+
+    Повертає словник з ключами "open", "close", "price" або None, якщо мітигацію не знайдено.
+    """
     z_low, z_high = (min(fvg_min, fvg_max), max(fvg_min, fvg_max))
     start = fvg_time + pd.Timedelta(minutes=15)  # якщо fvg_time – close FVG-бару
     candles = m15_df.loc[start:]
