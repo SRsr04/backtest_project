@@ -28,7 +28,11 @@ def get_historical_ohlc(session, symbol, interval, total_batches=10):
         time.sleep(0.2)
 
     df = pd.DataFrame([row[:6] for row in all_data], columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-    df['time'] = pd.to_datetime(df['time'], errors = 'coerce', unit='ms')
+    df['time'] = pd.to_datetime(
+        pd.to_numeric(df['time'], errors='coerce'),
+        errors='coerce',
+        unit='ms'
+    )
 
     df = df.astype({
         'open': 'float',
