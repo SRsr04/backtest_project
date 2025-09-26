@@ -42,7 +42,7 @@ def fractals_after_fvg(fvg_df, fractals_df):
     EPS = 1e-9
 
     for _, fvg in fvg_df.iterrows():
-        # Визначаємо параметри zoni
+
         fvg_time = np.datetime64(fvg['time']) + np.timedelta64(15, 'm')
         fvg_min = fvg['min']
         fvg_max = fvg['max']
