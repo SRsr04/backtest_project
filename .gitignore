@@ -5,6 +5,7 @@
 # Ігноруємо папки з даними
 logs/
 datasets/
+api/
 
 # Python-specific
 __pycache__/
