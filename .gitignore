@@ -6,7 +6,9 @@
 logs/
 datasets/
 api/
-
+prev_code/
+backtest_results/
+load_data OKX/
 # Python-specific
 __pycache__/
 *.pyc
