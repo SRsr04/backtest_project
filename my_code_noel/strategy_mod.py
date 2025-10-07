@@ -1,5 +1,7 @@
 import pandas as pd
-
+from constants import API_KEY, API_SECRET
+from pybit.unified_trading import HTTP
+from my_code_noel.Utils.data_proccessing import get_historical_ohlc
 from collections import deque
 from dataclasses import dataclass
 from typing import Optional, Tuple, List
@@ -9,21 +11,29 @@ class Candle:
     o: float; h: float; l: float; c: float
 
 class RollingSMA:
+
     def __init__(self, period: int):
+
         self.period = period
         self.buf = deque(maxlen=period)
         self.sum = 0.0
         self.value: Optional[float] = None
 
     def update(self, x: float) -> Optional[float]:
+
         if len(self.buf) == self.period:
+
             self.sum -= self.buf[0]
+            
         self.buf.append(x)
         self.sum += x
+
         if len(self.buf) == self.period:
             self.value = self.sum / self.period
+
         else:
             self.value = None
+
         return self.value
 
 class FractalDetector:
@@ -41,9 +51,13 @@ class FractalDetector:
 
     def update(self, idx: int, cndl: Candle):
         self._w.append(cndl)
+
         if len(self._w) < 3: 
+
             return None, None  # (type, level)
+        
         a, b, c = self._w[0], self._w[1], self._w[2]
+
         # Бычий фрактал: максимум середины выше соседей
         if b.h > a.h and b.h > c.h:
             self.last_confirmed_idx = idx - 1  # индекс средней свечи
@@ -51,6 +65,7 @@ class FractalDetector:
             self.last_bu_confirmed_idx = idx - 1
             self.last_bu_level = b.h
             return "bull", b.h
+        
         # Медвежий фрактал: минимум середины ниже соседей
         if b.l < a.l and b.l < c.l:
             self.last_confirmed_idx = idx - 1
@@ -59,6 +74,7 @@ class FractalDetector:
             self.last_be_level = b.l
 
             return "bear", b.l
+        
         return None, None
 
 class FVGDetector:
@@ -185,9 +201,7 @@ class Strategy:
 # Example
 st = Strategy(s_sma_per=28, f_sma_per=14)
 
-from api.constants import API_KEY, API_SECRET
-from pybit.unified_trading import HTTP
-from Utils.data_preprocessing import get_historical_ohlc
+
 
 session = HTTP(demo=True, api_key=API_KEY, api_secret=API_SECRET)
 ohlc = get_historical_ohlc(session=session, symbol='BTCUSDT', interval='1')

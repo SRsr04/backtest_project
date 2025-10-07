@@ -1,9 +1,8 @@
 import pandas as pd
 from pybit.unified_trading import HTTP
-from api.constants import API_KEY, API_SECRET
 import time
 
-def get_historical_ohlc(session, symbol, interval, total_batches=10):
+def get_historical_ohlc(session, symbol, interval, total_batches=5):
 
     all_data = []
     end_time = int(time.time() * 1000)
