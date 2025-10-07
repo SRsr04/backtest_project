@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 
 def calculate_metrics(profits):
-
     metrics = {}
 
     profits = np.asarray(profits, dtype=np.float64)
@@ -20,5 +19,29 @@ def calculate_metrics(profits):
     metrics['Average Win'] = np.mean(win_trades) if len(win_trades) > 0 else 0.0
     metrics['Average Loss'] = np.mean(loss_trades) if len(loss_trades) > 0 else 0.0
     metrics['Profit Factor'] = abs(np.sum(win_trades) / np.sum(loss_trades)) if np.sum(loss_trades) != 0 else 0.0
+
+    # --- додатково ---
+    # Максимальна серія лосів підряд
+    max_consecutive_losses = 0
+    current_losses = 0
+    for p in profits:
+        if p < 0:
+            current_losses += 1
+            max_consecutive_losses = max(max_consecutive_losses, current_losses)
+        else:
+            current_losses = 0
+    metrics['Max Consecutive Losses'] = max_consecutive_losses
+
+    # Максимальна просадка
+    equity_curve = np.cumsum(profits)
+    peak = -np.inf
+    max_dd = 0
+    for eq in equity_curve:
+        if eq > peak:
+            peak = eq
+        dd = peak - eq
+        if dd > max_dd:
+            max_dd = dd
+    metrics['Max Drawdown'] = max_dd
 
     return round(pd.DataFrame([metrics]), 2)

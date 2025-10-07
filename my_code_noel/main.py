@@ -1,7 +1,7 @@
 from Utils.websocket_client import WS_Client
 from technicals import detect_fvg
 from strategy import get_signal
-from constants import API_KEY, API_SECRET, SYMBOL
+from constants import API_KEY, API_SECRET #SYMBOL
 from pybit.unified_trading import HTTP
 
 session = HTTP(demo=True, api_key=API_KEY, api_secret=API_SECRET)
@@ -44,7 +44,7 @@ def on_candle(ohlc):
     side = 'Buy' if signal == 1 else 'Sell'
     session.place_order(
         category='linear', 
-        symbol=SYMBOL, 
+        # symbol=SYMBOL, 
         side=side, 
         order_type='Market', 
         qty=1, 

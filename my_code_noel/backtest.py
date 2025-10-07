@@ -70,6 +70,3 @@ print(all_results)
 
 
 
-
-
-
