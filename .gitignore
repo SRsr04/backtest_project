@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-my_code_noel/constants.py
-=======
 # Ігноруємо всі CSV
 *.csv
 *.log
@@ -13,12 +10,10 @@ prev_code/
 others/
 backtest_results/
 load_data OKX/
-.constants.py
+constants.py
 # Python-specific
 __pycache__/
 *.pyc
 .venv/
 .env
 .ipynb_checkpoints/
->>>>>>> 29ab2cb (Revert "Stop tracking constants.py")
-my_code_noel/constants.py
