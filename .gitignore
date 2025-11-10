@@ -21,3 +21,4 @@ __pycache__/
 .env
 .ipynb_checkpoints/
 >>>>>>> 29ab2cb (Revert "Stop tracking constants.py")
+my_code_noel/constants.py
