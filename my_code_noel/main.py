@@ -1,58 +1,59 @@
-from Utils.websocket_client import WS_Client
-from technicals import detect_fvg
-from strategy import get_signal
-from constants import API_KEY, API_SECRET #SYMBOL
+import time
 from pybit.unified_trading import HTTP
+from datetime import datetime, timezone, UTC
+from typing import Tuple
 
-session = HTTP(demo=True, api_key=API_KEY, api_secret=API_SECRET)
-
-RISK_USD = 1000.0
-
-def qty_from_risk(entry_price, stop_loss, risk_usd = RISK_USD):
-
-    dist = abs(entry_price - stop_loss)
-    if dist <= 0:
-        return '0'
-    qty = risk_usd / dist
-    return round(qty, 3)
-
-
-def on_candle(ohlc):
-
-    if len(ohlc) <= 2:
-
-        return
-
-    last_3_candels = ohlc.iloc[-3:]
-    fvg, fvg_top, fvg_bottom = detect_fvg(last_3_candels)
-
-    current_candle = last_3_candels.iloc[-1].copy()
-    current_candle['fvg'] = fvg
-    current_candle['fvg_top'] = fvg_top
-    current_candle['fvg_bottom'] = fvg_bottom
-
-    signal, stop_loss, take_profit = get_signal(current_candle=current_candle)
-
-    if signal not in (1, -1):
-        return 
-    
-    qty = qty_from_risk(entry_price=current_candle['close'], stop_loss=stop_loss)
-    if float(qty) <= 0:
-        print('SL/Entry < 0')
-        return
-    
-    side = 'Buy' if signal == 1 else 'Sell'
-    session.place_order(
-        category='linear', 
-        # symbol=SYMBOL, 
-        side=side, 
-        order_type='Market', 
-        qty=1, 
-        time_in_force='GoodTillCancel', 
-        takeProfit=str(take_profit), 
-        stopLoss=str(stop_loss))
-
+# Імпортуємо необхідні компоненти
+from strategy import TradingStrategy, LIVE_CONFIG # Імпортуємо конфіг звідти ж
+from Utils.websocket_client import WS_Client
+from constants import API_KEY, API_SECRET # Твої ключі API
 
 if __name__ == '__main__':
-    client = WS_Client(on_candle=on_candle)
-    client.run() 
+    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}] Запуск основного скрипту...")
+
+    # --- 1. Ініціалізація HTTP сесії ---
+    try:
+        session = HTTP(
+            testnet=True, 
+            api_key=API_KEY,
+            api_secret=API_SECRET
+        )
+        print("HTTP сесія створена (testnet=True).")
+    except Exception as e:
+        print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}] ПОМИЛКА створення HTTP сесії: {e}")
+        exit()
+
+    # --- 2. Створення екземпляру стратегії ---
+    try:
+        strategy = TradingStrategy(session, LIVE_CONFIG)
+    except Exception as e:
+        print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}] ПОМИЛКА створення екземпляру стратегії: {e}")
+        exit()
+
+    # --- 3. Створення та запуск WebSocket клієнта ---
+    try:
+        ws_client = WS_Client(symbol=LIVE_CONFIG['symbol'], strategy_instance=strategy)
+        print("WebSocket клієнт створено. Очікування повідомлень...")
+    except Exception as e:
+        print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}] ПОМИЛКА створення WebSocket клієнта: {e}")
+        exit()
+
+    # --- 4. Підтримуємо основний потік живим ---
+    try:
+        last_heartbeat_time = time.time()
+        heartbeat_interval = 300 # 5 хвилин
+
+        while True:
+            current_time = time.time()
+            if current_time - last_heartbeat_time >= heartbeat_interval:
+                active_setups_count = len(getattr(strategy, 'active_setups', []))
+                print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}] Бот працює... (Активних сетапів: {active_setups_count})")
+                last_heartbeat_time = current_time
+            
+            time.sleep(10) 
+
+    except KeyboardInterrupt:
+        print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}] Отримано сигнал зупинки (Ctrl+C). Завершення роботи...")
+        if ws_client._ws:
+             ws_client._ws.close()
+        print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}] Роботу завершено.")
