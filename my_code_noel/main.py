@@ -7,7 +7,7 @@ from typing import Tuple
 from strategy import TradingStrategy, LIVE_CONFIG # Імпортуємо конфіг звідти ж
 from Utils.websocket_client import WS_Client
 from constants import API_KEY, API_SECRET # Твої ключі API
-
+import pandas as pd
 if __name__ == '__main__':
     print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}] Запуск основного скрипту...")
 
